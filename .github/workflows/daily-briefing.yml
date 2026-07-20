@@ -1,0 +1,45 @@
+name: 📅 데일리 브리핑 자동화
+
+on:
+  schedule:
+    # 매일 오전 8시 (한국 시간 기준, UTC-9)
+    - cron: '0 23 * * 1-5'  # 월-금 23:00 UTC = 08:00 KST
+  workflow_dispatch:  # 수동 실행도 가능
+
+jobs:
+  daily-briefing:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📦 코드 체크아웃
+        uses: actions/checkout@v3
+
+      - name: 🐍 Python 3.11 설정
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 📚 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 🚀 데일리 브리핑 생성 및 발송
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          NOTION_BRIEFING_DB_ID: ${{ secrets.NOTION_BRIEFING_DB_ID }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+          SMTP_EMAIL: ${{ secrets.SMTP_EMAIL }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+        run: |
+          python scripts/daily_briefing.py
+
+      - name: 📊 실행 결과 로깅
+        if: always()
+        run: |
+          echo "✅ 데일리 브리핑 자동화 완료"
+          echo "시간: $(date '+%Y-%m-%d %H:%M:%S')"
