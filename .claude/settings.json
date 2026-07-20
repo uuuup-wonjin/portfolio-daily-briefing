@@ -1,0 +1,6 @@
+{
+  "skills": {
+    "search_paths": [".claude/skills"],
+    "enabled": ["office-hours", "plan-ceo-review", "plan-eng-review", "design-consultation", "review", "qa", "ship"]
+  }
+}
