@@ -23,13 +23,19 @@ class DailyBriefing:
         self.notion_token = os.getenv('NOTION_TOKEN')
         self.notion_db_id = os.getenv('NOTION_DATABASE_ID')
         self.briefing_db_id = os.getenv('NOTION_BRIEFING_DB_ID')  # 브리핑 저장용
+
+        # Slack/이메일은 선택사항
         self.slack_token = os.getenv('SLACK_BOT_TOKEN')
         self.slack_channel = os.getenv('SLACK_CHANNEL_ID')
         self.smtp_email = os.getenv('SMTP_EMAIL')
         self.smtp_password = os.getenv('SMTP_PASSWORD')
         self.recipient_email = os.getenv('RECIPIENT_EMAIL')
 
-        self.slack_client = WebClient(token=self.slack_token)
+        if self.slack_token:
+            self.slack_client = WebClient(token=self.slack_token)
+        else:
+            self.slack_client = None
+
         self.notion_headers = {
             'Authorization': f'Bearer {self.notion_token}',
             'Notion-Version': '2022-06-28',
@@ -292,12 +298,8 @@ class DailyBriefing:
         print("💾 Notion에 저장 중...")
         self.save_to_notion(briefing, data)
 
-        # 4. 발송
-        print("📤 Slack/이메일 발송 중...")
-        self.send_slack(briefing)
-        self.send_email(briefing)
-
-        print("✅ 데일리 브리핑 완료!")
+        print("✅ 데일리 브리핑이 Notion에 저장되었습니다!")
+        print("📌 검토 후 수동으로 발송하세요.")
 
 
 if __name__ == '__main__':
