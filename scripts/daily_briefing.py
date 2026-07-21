@@ -2,45 +2,35 @@
 """
 포트폴리오 프로젝트 데일리 브리핑 자동화
 - Notion에서 데이터 조회
-- 브리핑 생성 후 Notion에 저장
-- Slack과 이메일로 발송
+- 브리핑 생성 후 Google Docs에 저장
 """
 
 import os
 import json
-import smtplib
 from datetime import datetime, timedelta
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 
 import requests
-from slack_sdk import WebClient
-from slack_sdk.errors import SlackApiError
+from google.auth.transport.requests import Request
+from google.oauth2.service_account import Credentials
+from google.api_core.exceptions import GoogleAPIError
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 
 class DailyBriefing:
     def __init__(self):
         self.notion_token = os.getenv('NOTION_TOKEN')
         self.notion_db_id = os.getenv('NOTION_DATABASE_ID')
-        self.briefing_db_id = os.getenv('NOTION_BRIEFING_DB_ID')  # 브리핑 저장용
-
-        # Slack/이메일은 선택사항
-        self.slack_token = os.getenv('SLACK_BOT_TOKEN')
-        self.slack_channel = os.getenv('SLACK_CHANNEL_ID')
-        self.smtp_email = os.getenv('SMTP_EMAIL')
-        self.smtp_password = os.getenv('SMTP_PASSWORD')
-        self.recipient_email = os.getenv('RECIPIENT_EMAIL')
-
-        if self.slack_token:
-            self.slack_client = WebClient(token=self.slack_token)
-        else:
-            self.slack_client = None
+        self.google_docs_folder_id = os.getenv('GOOGLE_DOCS_FOLDER_ID')  # Google Drive 폴더 ID
 
         self.notion_headers = {
             'Authorization': f'Bearer {self.notion_token}',
             'Notion-Version': '2022-06-28',
             'Content-Type': 'application/json'
         }
+
+        # Google Docs API 인증
+        self.docs_service = self._init_google_docs()
 
     def get_notion_data(self):
         """Notion 데이터베이스에서 오늘/어제 항목 조회"""
@@ -138,6 +128,28 @@ class DailyBriefing:
             return None
         return prop['date']['start'] if prop['date'] else None
 
+    def _init_google_docs(self):
+        """Google Docs API 초기화"""
+        try:
+            service_account_json = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
+            if not service_account_json:
+                print("❌ GOOGLE_SERVICE_ACCOUNT_JSON 환경 변수 없음")
+                return None
+
+            service_account_info = json.loads(service_account_json)
+            credentials = Credentials.from_service_account_info(
+                service_account_info,
+                scopes=['https://www.googleapis.com/auth/documents',
+                        'https://www.googleapis.com/auth/drive']
+            )
+
+            service = build('docs', 'v1', credentials=credentials)
+            return service
+
+        except Exception as e:
+            print(f"❌ Google Docs API 초기화 실패: {e}")
+            return None
+
     def generate_briefing(self, data):
         """브리핑 메시지 생성"""
         today = datetime.now().strftime('%Y년 %m월 %d일 (%A)')
@@ -178,109 +190,72 @@ class DailyBriefing:
 
         return message
 
-    def send_slack(self, message):
-        """Slack으로 메시지 발송"""
+    def save_to_google_docs(self, briefing_text):
+        """생성된 브리핑을 Google Docs에 저장"""
         try:
-            self.slack_client.chat_postMessage(
-                channel=self.slack_channel,
-                text=message
-            )
-            print("✅ Slack 발송 완료")
-        except SlackApiError as e:
-            print(f"❌ Slack 발송 실패: {e}")
+            if not self.docs_service:
+                print("❌ Google Docs API 사용 불가")
+                return None
 
-    def save_to_notion(self, briefing_text, data):
-        """생성된 브리핑을 Notion 데이터베이스에 저장"""
-        try:
-            url = 'https://api.notion.com/v1/pages'
-
-            # 브리핑 날짜
+            # Google Docs 문서 생성
             briefing_date = datetime.now().strftime('%Y-%m-%d')
+            title = f'📅 데일리 브리핑 - {briefing_date}'
 
-            payload = {
-                'parent': {
-                    'database_id': self.briefing_db_id
-                },
-                'properties': {
-                    '제목': {
-                        'title': [
-                            {
-                                'text': {
-                                    'content': f'📅 데일리 브리핑 - {briefing_date}'
-                                }
-                            }
-                        ]
-                    },
-                    '날짜': {
-                        'date': {
-                            'start': briefing_date
-                        }
-                    },
-                    '완료항목': {
-                        'number': len(data.get('yesterday', []))
-                    },
-                    '계획항목': {
-                        'number': len(data.get('today', []))
-                    },
-                    '미실행항목': {
-                        'number': len(data.get('pending', []))
-                    },
-                    '내용': {
-                        'rich_text': [
-                            {
-                                'text': {
-                                    'content': briefing_text
-                                }
-                            }
-                        ]
-                    }
-                }
+            document = {
+                'title': title
             }
 
-            response = requests.post(url, json=payload, headers=self.notion_headers)
-            response.raise_for_status()
+            doc = self.docs_service.documents().create(body=document).execute()
+            doc_id = doc.get('documentId')
 
-            print("✅ Notion에 브리핑 저장 완료")
-            return True
+            # 문서에 내용 추가
+            requests_list = [
+                {
+                    'insertText': {
+                        'text': briefing_text,
+                        'location': {
+                            'index': 1
+                        }
+                    }
+                }
+            ]
+
+            self.docs_service.documents().batchUpdate(
+                documentId=doc_id,
+                body={'requests': requests_list}
+            ).execute()
+
+            # 공유 링크 생성 (Google Drive API 필요)
+            drive_service = build('drive', 'v3', credentials=self.docs_service._http.request)
+
+            # 문서를 폴더에 이동 (선택)
+            if self.google_docs_folder_id:
+                drive_service.files().update(
+                    fileId=doc_id,
+                    addParents=self.google_docs_folder_id,
+                    removeParents='root'
+                ).execute()
+
+            # 모두가 볼 수 있도록 공유
+            drive_service.permissions().create(
+                fileId=doc_id,
+                body={
+                    'kind': 'drive#permission',
+                    'role': 'reader',
+                    'type': 'anyone'
+                }
+            ).execute()
+
+            # 공유 링크
+            share_link = f'https://docs.google.com/document/d/{doc_id}/edit?usp=sharing'
+
+            print(f"✅ Google Docs 생성 완료")
+            print(f"📎 링크: {share_link}")
+            return share_link
 
         except Exception as e:
-            print(f"❌ Notion 저장 실패: {e}")
-            return False
-
-    def send_email(self, message):
-        """이메일로 발송"""
-        try:
-            msg = MIMEMultipart('alternative')
-            msg['Subject'] = f"📅 데일리 브리핑 - {datetime.now().strftime('%Y-%m-%d')}"
-            msg['From'] = self.smtp_email
-            msg['To'] = self.recipient_email
-
-            # HTML 버전 생성
-            html = f"""
-            <html>
-              <body style="font-family: Arial; line-height: 1.6;">
-                <h2>📅 포트폴리오 프로젝트 데일리 브리핑</h2>
-                <pre style="background: #f5f5f5; padding: 15px; border-radius: 5px;">
-{message}
-                </pre>
-                <hr>
-                <small>이 메일은 자동으로 생성되었습니다. Notion에도 저장됩니다.</small>
-              </body>
-            </html>
-            """
-
-            part = MIMEText(html, 'html')
-            msg.attach(part)
-
-            # SMTP 발송
-            with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-                server.login(self.smtp_email, self.smtp_password)
-                server.send_message(msg)
-
-            print("✅ 이메일 발송 완료")
-
-        except Exception as e:
-            print(f"❌ 이메일 발송 실패: {e}")
+            print(f"❌ Google Docs 저장 실패: {e}")
+            return None
 
     def run(self):
         """전체 브리핑 프로세스 실행"""
@@ -294,12 +269,15 @@ class DailyBriefing:
         print("📝 브리핑 생성 중...")
         briefing = self.generate_briefing(data)
 
-        # 3. Notion에 저장
-        print("💾 Notion에 저장 중...")
-        self.save_to_notion(briefing, data)
+        # 3. Google Docs에 저장
+        print("💾 Google Docs에 저장 중...")
+        share_link = self.save_to_google_docs(briefing)
 
-        print("✅ 데일리 브리핑이 Notion에 저장되었습니다!")
-        print("📌 검토 후 수동으로 발송하세요.")
+        if share_link:
+            print(f"\n✅ 데일리 브리핑이 생성되었습니다!")
+            print(f"📄 Google Docs 링크: {share_link}")
+        else:
+            print("❌ Google Docs 저장 실패")
 
 
 if __name__ == '__main__':
