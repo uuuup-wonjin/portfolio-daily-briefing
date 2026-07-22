@@ -22,7 +22,8 @@ class DailyBriefing:
     def __init__(self):
         self.notion_token = os.getenv('NOTION_TOKEN')
         self.notion_db_id = os.getenv('NOTION_DATABASE_ID')
-        self.google_docs_folder_id = os.getenv('GOOGLE_DOCS_FOLDER_ID')  # Google Drive 폴더 ID
+        self.google_docs_folder_id = os.getenv('GOOGLE_DOCS_FOLDER_ID')
+        self.google_sheets_id = os.getenv('GOOGLE_SHEETS_ID')
 
         self.notion_headers = {
             'Authorization': f'Bearer {self.notion_token}',
@@ -30,8 +31,10 @@ class DailyBriefing:
             'Content-Type': 'application/json'
         }
 
-        # Google Docs API 인증
+        # Google API 인증
         self.docs_service = self._init_google_docs()
+        self.sheets_service = self._init_google_sheets()
+        self.drive_service = self._init_google_drive()
 
     def get_notion_data(self):
         """Notion 데이터베이스에서 오늘/어제 항목 조회"""
@@ -127,7 +130,7 @@ class DailyBriefing:
             service_account_info = json.loads(service_account_json)
             credentials = Credentials.from_service_account_info(
                 service_account_info,
-                scopes=['https://www.googleapis.com/auth/drive']
+                scopes=['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
             )
 
             self.credentials = credentials
@@ -136,6 +139,74 @@ class DailyBriefing:
 
         except Exception as e:
             print(f"❌ Google Drive API 초기화 실패: {e}")
+            return None
+
+    def _init_google_sheets(self):
+        """Google Sheets API 초기화"""
+        try:
+            if not hasattr(self, 'credentials'):
+                return None
+            service = build('sheets', 'v4', credentials=self.credentials)
+            return service
+        except Exception as e:
+            print(f"❌ Google Sheets API 초기화 실패: {e}")
+            return None
+
+    def _init_google_drive(self):
+        """Google Drive API 초기화"""
+        try:
+            if not hasattr(self, 'credentials'):
+                return None
+            service = build('drive', 'v3', credentials=self.credentials)
+            return service
+        except Exception as e:
+            print(f"❌ Google Drive API 초기화 실패: {e}")
+            return None
+
+    def create_google_sheets(self):
+        """Google Sheets 자동 생성"""
+        try:
+            if not self.sheets_service:
+                print("❌ Google Sheets API 사용 불가")
+                return None
+
+            # 새로운 Spreadsheet 생성
+            spreadsheet = {
+                'properties': {
+                    'title': '📅 포트폴리오 데일리 브리핑'
+                }
+            }
+
+            result = self.sheets_service.spreadsheets().create(
+                body=spreadsheet,
+                fields='spreadsheetId'
+            ).execute()
+
+            sheet_id = result.get('spreadsheetId')
+
+            # 첫 번째 행에 헤더 추가
+            values = [['날짜', '브리핑 내용']]
+            body = {'values': values}
+
+            self.sheets_service.spreadsheets().values().update(
+                spreadsheetId=sheet_id,
+                range='A1',
+                valueInputOption='RAW',
+                body=body
+            ).execute()
+
+            print(f"✅ Google Sheets 생성 완료")
+            print(f"📝 Sheet ID: {sheet_id}")
+            print(f"📎 링크: https://docs.google.com/spreadsheets/d/{sheet_id}/edit")
+
+            # Sheet ID를 파일에 저장
+            with open('.sheets_id', 'w') as f:
+                f.write(sheet_id)
+
+            return sheet_id
+
+        except Exception as e:
+            print(f"❌ Google Sheets 생성 실패: {e}")
             return None
 
     def generate_briefing(self, data):
@@ -197,12 +268,40 @@ class DailyBriefing:
             print(f"✅ 브리핑 생성 완료")
             print(f"📝 파일: {filename}")
             print(f"📎 GitHub 저장소에 저장됨")
-            print(f"🔗 링크: https://github.com/uuuup-wonjin/portfolio-daily-briefing/tree/main/briefings")
 
             return filename
 
         except Exception as e:
             print(f"❌ 브리핑 저장 실패: {e}")
+            return None
+
+    def save_to_google_sheets(self, briefing_text):
+        """생성된 브리핑을 Google Sheets에 추가"""
+        try:
+            if not self.sheets_service or not self.google_sheets_id:
+                print("⏭️  Google Sheets 저장 건너뜀 (설정 없음)")
+                return None
+
+            briefing_date = datetime.now().strftime('%Y-%m-%d')
+
+            # Sheet에 행 추가
+            values = [[briefing_date, briefing_text]]
+            body = {'values': values}
+
+            self.sheets_service.spreadsheets().values().append(
+                spreadsheetId=self.google_sheets_id,
+                range='A:B',
+                valueInputOption='RAW',
+                body=body
+            ).execute()
+
+            print(f"✅ Google Sheets에 추가 완료")
+            print(f"📎 링크: https://docs.google.com/spreadsheets/d/{self.google_sheets_id}/edit")
+
+            return self.google_sheets_id
+
+        except Exception as e:
+            print(f"⚠️  Google Sheets 저장 실패: {e}")
             return None
 
     def run(self):
@@ -217,15 +316,22 @@ class DailyBriefing:
         print("📝 브리핑 생성 중...")
         briefing = self.generate_briefing(data)
 
-        # 3. Google Docs에 저장
-        print("💾 Google Docs에 저장 중...")
-        share_link = self.save_to_google_docs(briefing)
+        # 3. GitHub에 저장
+        print("📤 GitHub에 저장 중...")
+        github_link = self.save_to_google_docs(briefing)
 
-        if share_link:
+        # 4. Google Sheets에 추가
+        print("📊 Google Sheets에 추가 중...")
+        sheets_link = self.save_to_google_sheets(briefing)
+
+        if github_link or sheets_link:
             print(f"\n✅ 데일리 브리핑이 생성되었습니다!")
-            print(f"📄 Google Docs 링크: {share_link}")
+            if github_link:
+                print(f"📎 GitHub: https://github.com/uuuup-wonjin/portfolio-daily-briefing/tree/main/briefings")
+            if sheets_link:
+                print(f"📊 Google Sheets: https://docs.google.com/spreadsheets/d/{sheets_link}/edit")
         else:
-            print("❌ Google Docs 저장 실패")
+            print("⚠️  브리핑 생성은 완료했으나 저장 실패")
 
 
 if __name__ == '__main__':
