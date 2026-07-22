@@ -37,7 +37,7 @@ class DailyBriefing:
         self.drive_service = self._init_google_drive()
 
     def get_notion_data(self):
-        """Notion 데이터베이스에서 오늘/어제 항목 조회"""
+        """Notion 데이터베이스에서 모든 항목 조회 (필터 완화)"""
         try:
             url = f'https://api.notion.com/v1/databases/{self.notion_db_id}/query'
 
@@ -50,13 +50,14 @@ class DailyBriefing:
             data = response.json()
             results = data.get('results', [])
 
-            # 오늘/어제 데이터 분류
+            # 단순 분류: 모든 항목 수집 (필터 완화)
             today = datetime.now().date()
             yesterday = today - timedelta(days=1)
 
             today_items = []
             yesterday_items = []
             pending_items = []
+            all_items = []
 
             for item in results:
                 props = item.get('properties', {})
@@ -70,31 +71,28 @@ class DailyBriefing:
                 if not title:
                     continue
 
-                # 상태별 분류
-                if status == 'COMPLETED':
-                    if created == str(yesterday):
-                        yesterday_items.append({
-                            'title': title,
-                            'status': status,
-                            'priority': priority
-                        })
-                elif status == 'PENDING' or priority == 'HIGH':
-                    pending_items.append({
-                        'title': title,
-                        'status': status,
-                        'priority': priority
-                    })
-                elif created == str(today):
-                    today_items.append({
-                        'title': title,
-                        'status': status,
-                        'priority': priority
-                    })
+                item_data = {
+                    'title': title,
+                    'status': status if status else '미정',
+                    'priority': priority if priority else '없음',
+                    'created': created if created else '미정'
+                }
 
+                # 우선순위: 완료(어제) > 미실행(PENDING) > 계획(오늘) > 전체
+                if status == 'COMPLETED' and created == str(yesterday):
+                    yesterday_items.append(item_data)
+                elif status == 'PENDING' or priority == 'HIGH':
+                    pending_items.append(item_data)
+                elif created == str(today):
+                    today_items.append(item_data)
+
+                all_items.append(item_data)
+
+            # 우선순위 순으로 반환
             return {
-                'today': today_items[:5],
-                'yesterday': yesterday_items[:5],
-                'pending': pending_items[:3]
+                'today': today_items[:5] if today_items else all_items[:3],
+                'yesterday': yesterday_items[:5] if yesterday_items else [],
+                'pending': pending_items[:3] if pending_items else all_items[3:6]
             }
 
         except Exception as e:
@@ -210,42 +208,97 @@ class DailyBriefing:
             return None
 
     def generate_briefing(self, data):
-        """브리핑 메시지 생성"""
-        today = datetime.now().strftime('%Y년 %m월 %d일 (%A)')
+        """UUUUP 규칙 적용 브리핑 생성"""
+        today = datetime.now()
+        date_str = today.strftime('%Y년 %m월 %d일')
+        day_name = ['월', '화', '수', '목', '금', '토', '일'][today.weekday()]
+        time_str = today.strftime('%H:%M')
 
-        message = f"""
-📅 **포트폴리오 프로젝트 데일리 브리핑**
+        message = f"""# 포트폴리오 프로젝트 데일리 브리핑 — {date_str} ({day_name})
 
-*{today}*
+**작성일**: {date_str} | **분석 기간**: {today.strftime('%Y-%m-%d')} ({day_name})
 
 ---
 
+## 1. 핵심 요약
+
+"""
+
+        # 핵심 요약 (최대 3줄)
+        summary_items = []
+        if data['yesterday']:
+            summary_items.append(f"✅ 어제 {len(data['yesterday'])}건 완료")
+        if data['today']:
+            summary_items.append(f"🎯 오늘 {len(data['today'])}건 계획")
+        if data['pending']:
+            summary_items.append(f"⚠️ 미실행 {len(data['pending'])}건 대기 중")
+
+        if summary_items:
+            for item in summary_items[:3]:
+                message += f"- {item}\n"
+        else:
+            message += "- 진행 중인 업무 없음\n"
+
+        message += """
+---
+
+## 2. 주요 업무 현황
+
+### 어제 완료 항목
 """
 
         # 어제 완료 항목
         if data['yesterday']:
-            message += "✅ **어제 완료 항목**\n"
-            for i, item in enumerate(data['yesterday'], 1):
-                message += f"  {i}. {item['title']}\n"
-            message += "\n"
+            message += "| 항목 | 우선순위 |\n"
+            message += "|------|----------|\n"
+            for item in data['yesterday']:
+                priority = item.get('priority', '없음')
+                message += f"| {item['title']} | {priority} |\n"
+        else:
+            message += "(완료 항목 없음)\n"
 
-        # 오늘 예정 항목
+        message += """
+### 오늘 계획
+"""
+
+        # 오늘 계획
         if data['today']:
-            message += "🎯 **오늘 계획**\n"
-            for i, item in enumerate(data['today'], 1):
-                priority_mark = "🔴" if item.get('priority') == 'HIGH' else "🟡"
-                message += f"  {i}. {priority_mark} {item['title']}\n"
-            message += "\n"
+            message += "| 항목 | 우선순위 | 상태 |\n"
+            message += "|------|----------|------|\n"
+            for item in data['today']:
+                priority = item.get('priority', '없음')
+                status = item.get('status', '미정')
+                message += f"| {item['title']} | {priority} | {status} |\n"
+        else:
+            message += "(등록된 계획 없음)\n"
+
+        message += """
+### 미실행 항목
+"""
 
         # 미실행 항목
         if data['pending']:
-            message += "⚠️ **미실행 항목 (우선순위)**\n"
-            for i, item in enumerate(data['pending'], 1):
-                message += f"  {i}. {item['title']} (상태: {item.get('status', '미정')})\n"
-            message += "\n"
+            message += "| 항목 | 상태 | 우선순위 |\n"
+            message += "|------|------|----------|\n"
+            for item in data['pending']:
+                status = item.get('status', '대기')
+                priority = item.get('priority', '없음')
+                message += f"| {item['title']} | {status} | {priority} |\n"
+        else:
+            message += "(미실행 항목 없음)\n"
 
-        message += "---\n"
-        message += f"생성: {datetime.now().strftime('%H:%M:%S')} | 자동화 시스템"
+        message += """
+---
+
+## 3. 주의사항
+
+- Notion 데이터 필터: 상태(COMPLETED/PENDING) 및 우선순위(HIGH) 기준
+- 미등록 항목은 "미정"으로 표기
+
+---
+
+"""
+        message += f"**생성**: {date_str} {time_str} KST | 자동화 시스템"
 
         return message
 
