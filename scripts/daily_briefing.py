@@ -116,7 +116,7 @@ class DailyBriefing:
         return prop['date']['start'] if prop['date'] else None
 
     def _init_google_docs(self):
-        """Google Docs API 초기화"""
+        """Google Drive API 초기화 (문서 생성용)"""
         try:
             service_account_json = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
             if not service_account_json:
@@ -126,16 +126,15 @@ class DailyBriefing:
             service_account_info = json.loads(service_account_json)
             credentials = Credentials.from_service_account_info(
                 service_account_info,
-                scopes=['https://www.googleapis.com/auth/documents',
-                        'https://www.googleapis.com/auth/drive']
+                scopes=['https://www.googleapis.com/auth/drive']
             )
 
             self.credentials = credentials
-            service = build('docs', 'v1', credentials=credentials)
+            service = build('drive', 'v3', credentials=credentials)
             return service
 
         except Exception as e:
-            print(f"❌ Google Docs API 초기화 실패: {e}")
+            print(f"❌ Google Drive API 초기화 실패: {e}")
             return None
 
     def generate_briefing(self, data):
@@ -179,42 +178,33 @@ class DailyBriefing:
         return message
 
     def save_to_google_docs(self, briefing_text):
-        """생성된 브리핑을 Google Docs에 저장"""
+        """생성된 브리핑을 Google Drive에 저장"""
         try:
             if not self.docs_service:
-                print("❌ Google Docs API 사용 불가")
+                print("❌ Google Drive API 사용 불가")
                 return None
 
-            # Google Docs 문서 생성
             briefing_date = datetime.now().strftime('%Y-%m-%d')
             title = f'📅 데일리 브리핑 - {briefing_date}'
 
-            document = {
-                'title': title
+            # Google Drive에 Google Docs 생성
+            file_metadata = {
+                'name': title,
+                'mimeType': 'application/vnd.google-apps.document'
             }
 
-            doc = self.docs_service.documents().create(body=document).execute()
-            doc_id = doc.get('documentId')
+            if self.google_docs_folder_id:
+                file_metadata['parents'] = [self.google_docs_folder_id]
 
-            # 문서에 내용 추가
-            requests_list = [
-                {
-                    'insertText': {
-                        'text': briefing_text,
-                        'location': {
-                            'index': 1
-                        }
-                    }
-                }
-            ]
-
-            self.docs_service.documents().batchUpdate(
-                documentId=doc_id,
-                body={'requests': requests_list}
+            media = None
+            file = self.docs_service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id, webViewLink'
             ).execute()
 
-            # 공유 링크 생성
-            share_link = f'https://docs.google.com/document/d/{doc_id}/edit?usp=sharing'
+            file_id = file.get('id')
+            share_link = file.get('webViewLink', f'https://docs.google.com/document/d/{file_id}/edit')
 
             print(f"✅ Google Docs 생성 완료")
             print(f"📎 링크: {share_link}")
