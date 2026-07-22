@@ -34,8 +34,20 @@ jobs:
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_DOCS_FOLDER_ID: ${{ secrets.GOOGLE_DOCS_FOLDER_ID }}
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
         run: |
           python scripts/daily_briefing.py
+
+      - name: 📊 Google Sheets ID 저장
+        if: always()
+        run: |
+          if [ -f .sheets_id ]; then
+            SHEETS_ID=$(cat .sheets_id)
+            echo "📝 Google Sheets ID: $SHEETS_ID"
+            echo "⚠️  GitHub Secrets에 다음 값을 추가하세요:"
+            echo "Name: GOOGLE_SHEETS_ID"
+            echo "Value: $SHEETS_ID"
+          fi
 
       - name: 📤 GitHub에 커밋 및 푸시
         run: |
