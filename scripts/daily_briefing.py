@@ -213,28 +213,7 @@ class DailyBriefing:
                 body={'requests': requests_list}
             ).execute()
 
-            # 공유 링크 생성 (Google Drive API 필요)
-            drive_service = build('drive', 'v3', credentials=self.credentials)
-
-            # 문서를 폴더에 이동 (선택)
-            if self.google_docs_folder_id:
-                drive_service.files().update(
-                    fileId=doc_id,
-                    addParents=self.google_docs_folder_id,
-                    removeParents='root'
-                ).execute()
-
-            # 모두가 볼 수 있도록 공유
-            drive_service.permissions().create(
-                fileId=doc_id,
-                body={
-                    'kind': 'drive#permission',
-                    'role': 'reader',
-                    'type': 'anyone'
-                }
-            ).execute()
-
-            # 공유 링크
+            # 공유 링크 생성
             share_link = f'https://docs.google.com/document/d/{doc_id}/edit?usp=sharing'
 
             print(f"✅ Google Docs 생성 완료")
