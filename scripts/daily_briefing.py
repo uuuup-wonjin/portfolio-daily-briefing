@@ -130,6 +130,7 @@ class DailyBriefing:
                         'https://www.googleapis.com/auth/drive']
             )
 
+            self.credentials = credentials
             service = build('docs', 'v1', credentials=credentials)
             return service
 
@@ -213,7 +214,7 @@ class DailyBriefing:
             ).execute()
 
             # 공유 링크 생성 (Google Drive API 필요)
-            drive_service = build('drive', 'v3', credentials=self.docs_service._http.request)
+            drive_service = build('drive', 'v3', credentials=self.credentials)
 
             # 문서를 폴더에 이동 (선택)
             if self.google_docs_folder_id:
