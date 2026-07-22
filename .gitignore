@@ -10,3 +10,4 @@ build/
 .venv/
 venv/
 *.egg-info/
+.sheets_id
