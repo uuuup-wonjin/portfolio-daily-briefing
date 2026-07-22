@@ -1,5 +1,8 @@
 name: 📅 데일리 브리핑 자동화
 
+permissions:
+  contents: write
+
 on:
   schedule:
     # 매일 오전 8시 (한국 시간 기준, UTC-9)
