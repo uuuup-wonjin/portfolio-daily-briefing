@@ -7,6 +7,7 @@
 
 import os
 import json
+import subprocess
 from datetime import datetime, timedelta
 
 import requests
@@ -37,67 +38,60 @@ class DailyBriefing:
         self.drive_service = self._init_google_drive()
 
     def get_notion_data(self):
-        """Notion 데이터베이스에서 모든 항목 조회 (필터 완화)"""
+        """Git 커밋 히스토리에서 오늘/어제 작업 내역 조회
+
+        Notion의 'Daily Briefings' DB는 실제 업무 데이터가 아니라
+        브리핑 저장용 필드 스키마 문서였기 때문에(실질 데이터 없음),
+        항상 채워지는 신뢰 가능한 소스인 git 커밋 로그를 사용한다.
+        """
         try:
-            url = f'https://api.notion.com/v1/databases/{self.notion_db_id}/query'
-
-            # 쿼리: 최근 데이터 (빈 payload - 모든 데이터 조회)
-            payload = {}
-
-            response = requests.post(url, json=payload, headers=self.notion_headers)
-            response.raise_for_status()
-
-            data = response.json()
-            results = data.get('results', [])
-
-            # 단순 분류: 모든 항목 수집 (필터 완화)
             today = datetime.now().date()
             yesterday = today - timedelta(days=1)
 
-            today_items = []
-            yesterday_items = []
-            pending_items = []
-            all_items = []
+            today_items = self._get_commits_for_date(today)
+            yesterday_items = self._get_commits_for_date(yesterday)
 
-            for item in results:
-                props = item.get('properties', {})
-
-                # 필요한 필드 추출
-                title = self._extract_text(props.get('Name'))
-                status = self._extract_select(props.get('상태'))
-                created = self._extract_date(props.get('생성일'))
-                priority = self._extract_select(props.get('우선순위'))
-
-                if not title:
-                    continue
-
-                item_data = {
-                    'title': title,
-                    'status': status if status else '미정',
-                    'priority': priority if priority else '없음',
-                    'created': created if created else '미정'
-                }
-
-                # 우선순위: 완료(어제) > 미실행(PENDING) > 계획(오늘) > 전체
-                if status == 'COMPLETED' and created == str(yesterday):
-                    yesterday_items.append(item_data)
-                elif status == 'PENDING' or priority == 'HIGH':
-                    pending_items.append(item_data)
-                elif created == str(today):
-                    today_items.append(item_data)
-
-                all_items.append(item_data)
-
-            # 우선순위 순으로 반환
             return {
-                'today': today_items[:5] if today_items else all_items[:3],
-                'yesterday': yesterday_items[:5] if yesterday_items else [],
-                'pending': pending_items[:3] if pending_items else all_items[3:6]
+                'today': today_items,
+                'yesterday': yesterday_items,
+                'pending': []
             }
 
         except Exception as e:
-            print(f"❌ Notion 데이터 조회 실패: {e}")
+            print(f"❌ Git 커밋 조회 실패: {e}")
             return {'today': [], 'yesterday': [], 'pending': []}
+
+    def _get_commits_for_date(self, target_date):
+        """지정 날짜(target_date)에 생성된 커밋 목록 조회"""
+        date_str = target_date.strftime('%Y-%m-%d')
+        try:
+            result = subprocess.run(
+                [
+                    'git', 'log',
+                    f'--since={date_str} 00:00:00',
+                    f'--until={date_str} 23:59:59',
+                    '--pretty=format:%h|%s'
+                ],
+                capture_output=True, text=True, check=True
+            )
+            lines = [l for l in result.stdout.splitlines() if l.strip()]
+
+            items = []
+            for line in lines:
+                parts = line.split('|', 1)
+                if len(parts) != 2:
+                    continue
+                short_hash, subject = parts
+                items.append({
+                    'title': subject,
+                    'status': '완료',
+                    'priority': '-',
+                    'created': f'{date_str} ({short_hash})'
+                })
+            return items
+        except subprocess.CalledProcessError as e:
+            print(f"⚠️  git log 조회 실패: {e}")
+            return []
 
     def _extract_text(self, prop):
         """Notion 텍스트 필드 추출"""
@@ -227,73 +221,53 @@ class DailyBriefing:
         # 핵심 요약 (최대 3줄)
         summary_items = []
         if data['yesterday']:
-            summary_items.append(f"✅ 어제 {len(data['yesterday'])}건 완료")
+            summary_items.append(f"✅ 어제 커밋 {len(data['yesterday'])}건")
         if data['today']:
-            summary_items.append(f"🎯 오늘 {len(data['today'])}건 계획")
-        if data['pending']:
-            summary_items.append(f"⚠️ 미실행 {len(data['pending'])}건 대기 중")
+            summary_items.append(f"🎯 오늘 커밋 {len(data['today'])}건")
 
         if summary_items:
             for item in summary_items[:3]:
                 message += f"- {item}\n"
         else:
-            message += "- 진행 중인 업무 없음\n"
+            message += "- 오늘/어제 커밋 활동 없음\n"
 
         message += """
 ---
 
-## 2. 주요 업무 현황
+## 2. 커밋 활동 내역
 
-### 어제 완료 항목
+### 어제 커밋
 """
 
-        # 어제 완료 항목
+        # 어제 커밋
         if data['yesterday']:
-            message += "| 항목 | 우선순위 |\n"
-            message += "|------|----------|\n"
+            message += "| 커밋 메시지 | 일시 |\n"
+            message += "|------------|------|\n"
             for item in data['yesterday']:
-                priority = item.get('priority', '없음')
-                message += f"| {item['title']} | {priority} |\n"
+                message += f"| {item['title']} | {item.get('created', '-')} |\n"
         else:
-            message += "(완료 항목 없음)\n"
+            message += "(커밋 없음)\n"
 
         message += """
-### 오늘 계획
+### 오늘 커밋
 """
 
-        # 오늘 계획
+        # 오늘 커밋
         if data['today']:
-            message += "| 항목 | 우선순위 | 상태 |\n"
-            message += "|------|----------|------|\n"
+            message += "| 커밋 메시지 | 일시 |\n"
+            message += "|------------|------|\n"
             for item in data['today']:
-                priority = item.get('priority', '없음')
-                status = item.get('status', '미정')
-                message += f"| {item['title']} | {priority} | {status} |\n"
+                message += f"| {item['title']} | {item.get('created', '-')} |\n"
         else:
-            message += "(등록된 계획 없음)\n"
-
-        message += """
-### 미실행 항목
-"""
-
-        # 미실행 항목
-        if data['pending']:
-            message += "| 항목 | 상태 | 우선순위 |\n"
-            message += "|------|------|----------|\n"
-            for item in data['pending']:
-                status = item.get('status', '대기')
-                priority = item.get('priority', '없음')
-                message += f"| {item['title']} | {status} | {priority} |\n"
-        else:
-            message += "(미실행 항목 없음)\n"
+            message += "(커밋 없음)\n"
 
         message += """
 ---
 
 ## 3. 주의사항
 
-- Notion 데이터 필터: 상태(COMPLETED/PENDING) 및 우선순위(HIGH) 기준
-- 미등록 항목은 "미정"으로 표기
+- 데이터 소스: 프로젝트 저장소 git 커밋 히스토리
+- 커밋이 없는 날은 "커밋 없음"으로 표기
 
 ---
 
