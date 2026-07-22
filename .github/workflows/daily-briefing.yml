@@ -34,8 +34,17 @@ jobs:
         run: |
           python scripts/daily_briefing.py
 
+      - name: 📤 GitHub에 커밋 및 푸시
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add briefings/
+          git commit -m "chore: 데일리 브리핑 자동 생성 - $(date '+%Y-%m-%d')" || echo "No changes to commit"
+          git push
+
       - name: 📊 실행 결과 로깅
         if: always()
         run: |
           echo "✅ 데일리 브리핑 자동화 완료"
           echo "시간: $(date '+%Y-%m-%d %H:%M:%S')"
+          echo "📎 GitHub 브리핑 폴더: https://github.com/uuuup-wonjin/portfolio-daily-briefing/tree/main/briefings"

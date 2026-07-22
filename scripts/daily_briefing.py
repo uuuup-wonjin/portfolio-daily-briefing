@@ -179,45 +179,30 @@ class DailyBriefing:
         return message
 
     def save_to_google_docs(self, briefing_text):
-        """생성된 브리핑을 Google Drive에 텍스트 파일로 저장"""
+        """생성된 브리핑을 GitHub에 저장"""
         try:
-            if not self.docs_service:
-                print("❌ Google Drive API 사용 불가")
-                return None
+            import os
 
             briefing_date = datetime.now().strftime('%Y-%m-%d')
-            title = f'📅 데일리 브리핑 - {briefing_date}'
 
-            # Google Drive에 텍스트 파일 생성
-            file_metadata = {
-                'name': title + '.txt',
-                'mimeType': 'text/plain'
-            }
+            # briefings 폴더 생성 (없으면)
+            if not os.path.exists('briefings'):
+                os.makedirs('briefings')
 
-            if self.google_docs_folder_id:
-                file_metadata['parents'] = [self.google_docs_folder_id]
+            # 파일 저장
+            filename = f'briefings/{briefing_date}.txt'
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write(briefing_text)
 
-            # MediaInMemoryUpload로 파일 업로드
-            media = MediaInMemoryUpload(
-                briefing_text.encode('utf-8'),
-                mimetype='text/plain'
-            )
+            print(f"✅ 브리핑 생성 완료")
+            print(f"📝 파일: {filename}")
+            print(f"📎 GitHub 저장소에 저장됨")
+            print(f"🔗 링크: https://github.com/uuuup-wonjin/portfolio-daily-briefing/tree/main/briefings")
 
-            file = self.docs_service.files().create(
-                body=file_metadata,
-                media_body=media,
-                fields='id'
-            ).execute()
-
-            file_id = file.get('id')
-            share_link = f'https://drive.google.com/file/d/{file_id}/view'
-
-            print(f"✅ Google Drive 파일 생성 완료")
-            print(f"📎 링크: {share_link}")
-            return share_link
+            return filename
 
         except Exception as e:
-            print(f"❌ Google Drive 저장 실패: {e}")
+            print(f"❌ 브리핑 저장 실패: {e}")
             return None
 
     def run(self):
