@@ -15,6 +15,7 @@ from google.oauth2.service_account import Credentials
 from google.api_core.exceptions import GoogleAPIError
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaInMemoryUpload
 
 
 class DailyBriefing:
@@ -196,15 +197,16 @@ class DailyBriefing:
             if self.google_docs_folder_id:
                 file_metadata['parents'] = [self.google_docs_folder_id]
 
-            # 파일 내용을 바이트로 변환
-            from io import BytesIO
-            media = BytesIO(briefing_text.encode('utf-8'))
-            media.seek(0)
+            # MediaInMemoryUpload로 파일 업로드
+            media = MediaInMemoryUpload(
+                briefing_text.encode('utf-8'),
+                mimetype='text/plain'
+            )
 
             file = self.docs_service.files().create(
                 body=file_metadata,
                 media_body=media,
-                fields='id, webViewLink'
+                fields='id'
             ).execute()
 
             file_id = file.get('id')
