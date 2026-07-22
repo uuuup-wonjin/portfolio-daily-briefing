@@ -37,14 +37,8 @@ class DailyBriefing:
         try:
             url = f'https://api.notion.com/v1/databases/{self.notion_db_id}/query'
 
-            # 쿼리: 최근 30일 데이터
+            # 쿼리: 최근 데이터 (필터 제거 - API 호환성)
             payload = {
-                "filter": {
-                    "property": "생성일",
-                    "date": {
-                        "past_week": {}
-                    }
-                },
                 "sorts": [
                     {
                         "property": "생성일",
