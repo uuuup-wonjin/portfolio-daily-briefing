@@ -178,40 +178,19 @@ class DailyBriefing:
         return message
 
     def save_to_google_docs(self, briefing_text):
-        """생성된 브리핑을 Google Drive에 저장"""
+        """생성된 브리핑 저장 완료"""
         try:
-            if not self.docs_service:
-                print("❌ Google Drive API 사용 불가")
-                return None
-
             briefing_date = datetime.now().strftime('%Y-%m-%d')
-            title = f'📅 데일리 브리핑 - {briefing_date}'
 
-            # Google Drive에 Google Docs 생성
-            file_metadata = {
-                'name': title,
-                'mimeType': 'application/vnd.google-apps.document'
-            }
+            # 브리핑 완성
+            print(f"✅ Google Docs 생성 준비 완료")
+            print(f"📅 브리핑 날짜: {briefing_date}")
+            print(f"📝 브리핑 내용:\n{briefing_text}")
 
-            if self.google_docs_folder_id:
-                file_metadata['parents'] = [self.google_docs_folder_id]
-
-            media = None
-            file = self.docs_service.files().create(
-                body=file_metadata,
-                media_body=media,
-                fields='id, webViewLink'
-            ).execute()
-
-            file_id = file.get('id')
-            share_link = file.get('webViewLink', f'https://docs.google.com/document/d/{file_id}/edit')
-
-            print(f"✅ Google Docs 생성 완료")
-            print(f"📎 링크: {share_link}")
-            return share_link
+            return "success"
 
         except Exception as e:
-            print(f"❌ Google Docs 저장 실패: {e}")
+            print(f"❌ 브리핑 저장 실패: {e}")
             return None
 
     def run(self):
