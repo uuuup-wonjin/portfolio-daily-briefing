@@ -37,15 +37,8 @@ class DailyBriefing:
         try:
             url = f'https://api.notion.com/v1/databases/{self.notion_db_id}/query'
 
-            # 쿼리: 최근 데이터 (필터 제거 - API 호환성)
-            payload = {
-                "sorts": [
-                    {
-                        "property": "생성일",
-                        "direction": "descending"
-                    }
-                ]
-            }
+            # 쿼리: 최근 데이터 (빈 payload - 모든 데이터 조회)
+            payload = {}
 
             response = requests.post(url, json=payload, headers=self.notion_headers)
             response.raise_for_status()
